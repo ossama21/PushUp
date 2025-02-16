@@ -21,7 +21,7 @@ import requests
 import sys
 from packaging import version  # Add this import
 
-App_Version = "Pushup Reminder Pro v1.7"
+App_Version = "Pushup Reminder Pro v1.8"
 
 # Valid themes for ttkbootstrap
 class Theme(Enum):
