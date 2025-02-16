@@ -15,20 +15,10 @@ from datetime import datetime
 from tkinter import messagebox
 from tkinter import simpledialog
 import pystray
-from pygame import mixer
-import pygame
-from tkinter import filedialog
 import win32com.client
 import pythoncom
-# Add new imports
-import requests
-import os
-import tempfile
-import subprocess
-from packaging import version
-import shutil
 
-App_Version = "Pushup Reminder Pro v1.6"
+App_Version = "Pushup Reminder Pro v1.7"
 
 # Valid themes for ttkbootstrap
 class Theme(Enum):
@@ -47,27 +37,28 @@ class AppSettings:
     interval_hours: int = 0
     interval_minutes: int = 45
     interval_seconds: int = 0
-    theme: str = "darkly"  # Changed from 'dark' to 'darkly'
-    notification_sound: str = "default"  # Changed from bool to str
-    custom_sound_path: Optional[str] = None
+    theme: str = "darkly"
     auto_start: bool = False
     minimize_to_tray: bool = True
     show_progress: bool = True
     daily_goal: int = 100
     rest_duration: int = 60
     pushup_animation: bool = True
-    auto_update: bool = True  # New setting for auto-update
-    
-    # Add validation for sound files
-    MAX_SOUND_SIZE = 1024 * 1024  # 1MB limit
-    ALLOWED_EXTENSIONS = {'.wav', '.mp3'}
-    
+    auto_update: bool = True
+
     @classmethod
     def load(cls) -> 'AppSettings':
         config_path = Path.home() / '.pushup_reminder' / 'config.json'
         if config_path.exists():
             with open(config_path, 'r') as f:
-                return cls(**json.load(f))
+                data = json.load(f)
+                # Remove old sound-related settings if they exist
+                data.pop('notification_sound', None)
+                data.pop('custom_sound_path', None)
+                # Only keep known settings
+                valid_fields = cls.__dataclass_fields__.keys()
+                filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+                return cls(**filtered_data)
         return cls()
     
     def save(self):
@@ -136,10 +127,6 @@ class Statistics:
         self.last_completion = None
         self.save_stats()
 
-    def check_daily_goal(self, goal: int) -> bool:
-        """Check if daily goal is reached"""
-        return self.today_pushups >= goal
-
 class NotificationService:
     def __init__(self, settings: AppSettings, stats: Statistics, root: ttk.Window, update_callback):
         self.settings = settings
@@ -147,8 +134,6 @@ class NotificationService:
         self.root = root
         self.toaster = ToastNotifier()
         self.update_callback = update_callback
-        pygame.mixer.init()
-        # Initialize COM for this thread
         pythoncom.CoInitialize()
     
     def notify_minimize(self, title: str, message: str):
@@ -174,9 +159,6 @@ class NotificationService:
                     threaded=True
                 )
             
-            # Play notification sound
-            self.play_notification_sound()
-            
         except Exception as e:
             print(f"Failed to send minimize notification: {e}")
 
@@ -187,63 +169,35 @@ class NotificationService:
             if not Path(icon_path).exists():
                 icon_path = str(Path(__file__).parent / 'assets' / 'icons' / 'logo.png')
             
-            # Play notification sound first
-            self.play_notification_sound()
-            
-            # Show the toast notification without Windows sound
+            # Play our custom notification sound first
+            self.toaster.show_toast(
+                title,
+                message,
+                icon_path=icon_path if Path(icon_path).exists() else None,
+                duration=5,
+                threaded=True
+            )
+            # Show completion dialog after notification
+            self.root.after(5000, lambda: CompletionDialog(
+                self.root,
+                self.settings.pushups,
+                self.stats,
+                self.update_callback
+            ))
+        except Exception as e:
+            print(f"Failed to send notification: {e}")
+            # Attempt to reinitialize COM and retry once
             try:
-                # Create shell object in the same thread
                 pythoncom.CoInitialize()
-                shell = win32com.client.Dispatch("WScript.Shell")
-                shell.Popup(
-                    message,
-                    0,  # Wait time (0 = don't wait)
-                    title,
-                    64  # Information icon
-                )
-                pythoncom.CoUninitialize()
-            except:
-                # Fallback to win10toast if shell popup fails
                 self.toaster.show_toast(
                     title,
                     message,
-                    icon_path=icon_path if Path(icon_path).exists() else None,
+                    icon_path=None,
                     duration=5,
                     threaded=True
                 )
-            
-            # Show completion dialog after notification
-            self.root.after(2000, lambda: CompletionDialog(
-                self.root,
-                self.settings.pushups,
-                self.stats,
-                self.update_callback
-            ))
-            
-        except Exception as e:
-            print(f"Failed to send notification: {e}")
-            # Final fallback - just show the completion dialog
-            self.root.after(1000, lambda: CompletionDialog(
-                self.root,
-                self.settings.pushups,
-                self.stats,
-                self.update_callback
-            ))
-
-    def play_notification_sound(self):
-        """Play the selected notification sound"""
-        try:
-            sounds_dir, default_sounds = setup_sounds_directory()
-            if self.settings.notification_sound == "custom" and self.settings.custom_sound_path:
-                sound_path = Path(self.settings.custom_sound_path)
-            else:
-                sound_path = sounds_dir / default_sounds[self.settings.notification_sound]
-                
-            if sound_path.exists():
-                pygame.mixer.music.load(str(sound_path))
-                pygame.mixer.music.play()
-        except Exception as e:
-            print(f"Failed to play notification sound: {e}")
+            except Exception as retry_error:
+                print(f"Retry failed: {retry_error}")
 
 class ReminderService:
     def __init__(self, settings: AppSettings, notification_service: NotificationService):
@@ -274,6 +228,7 @@ class ReminderService:
             # Reset notification_shown flag when the interval is complete
             elif self.notification_shown and (current_time - self.last_reminder) < total_seconds * 0.1:  # Reset in first 10% of new interval
                 self.notification_shown = False
+            
             time.sleep(1)  # Check every second instead of waiting full interval
     
     def start(self):
@@ -283,14 +238,14 @@ class ReminderService:
         self.last_reminder = time.time()  # Initialize last reminder time
         self.thread = threading.Thread(target=self._reminder_loop, daemon=True)
         self.thread.start()
-        
+    
     def stop(self):
         """Stop the reminder service"""
         self.running = False
         self.notification_shown = False  # Reset flag when stopping
         if self.thread:
             self.thread.join(timeout=1.0)
-
+    
     def get_remaining_time(self) -> int:
         """Get remaining time until next reminder in seconds"""
         if not self.running or not self.last_reminder:
@@ -302,81 +257,15 @@ class ReminderService:
         remaining = max(0, interval - int(elapsed))
         return remaining
 
-class UpdateService:
-    def __init__(self, current_version: str):
-        self.current_version = current_version
-        self.github_repo = "ossama21/PushUps_Reminder "  # Replace with your repo
-        self.github_api = f"https://api.github.com/ossama21/PushUps_Reminder/releases/latest"
-        
-    def check_for_updates(self) -> tuple[bool, Optional[str], Optional[str]]:
-        """Check if updates are available
-        Returns: (update_available, version, download_url)"""
-        try:
-            response = requests.get(self.github_api)
-            if response.status_code == 200:
-                release_data = response.json()
-                latest_version = release_data['tag_name'].lstrip('v')
-                download_url = release_data['assets'][0]['browser_download_url']
-                
-                if version.parse(latest_version) > version.parse(self.current_version):
-                    return True, latest_version, download_url
-            
-            return False, None, None
-        except Exception as e:
-            print(f"Failed to check for updates: {e}")
-            return False, None, None
-    
-    def download_and_install_update(self, download_url: str, callback=None) -> bool:
-        """Download and install the update"""
-        try:
-            # Download the new version
-            response = requests.get(download_url, stream=True)
-            if response.status_code != 200:
-                return False
-                
-            # Create temp directory
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Download file
-                temp_file = os.path.join(temp_dir, "update.exe")
-                with open(temp_file, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                
-                # Create update script
-                script_path = os.path.join(temp_dir, "update.bat")
-                current_exe = sys.executable
-                with open(script_path, 'w') as f:
-                    f.write(f'''@echo off
-timeout /t 2 /nobreak
-copy /Y "{temp_file}" "{current_exe}"
-start "" "{current_exe}"
-del "%~f0"
-''')
-                
-                # Run update script
-                subprocess.Popen(['cmd', '/c', script_path], 
-                               creationflags=subprocess.CREATE_NO_WINDOW,
-                               close_fds=True)
-                return True
-                
-        except Exception as e:
-            print(f"Failed to install update: {e}")
-            if callback:
-                callback(f"Update failed: {e}")
-            return False
-
 class ModernPushupApp:
     def __init__(self):
         self.settings = AppSettings.load()
-        # Initialize update service
-        self.update_service = UpdateService(App_Version.split()[-1])
         
         # Create the main window with ttkbootstrap
         self.root = ttk.Window(
             title="Pushup Reminder Pro",
             themename=self.settings.theme,
-            size=(900, 700)  # Increased window size
+            size=(800, 500)
         )
         
         # Set window icon
@@ -390,10 +279,11 @@ class ModernPushupApp:
             print(f"Failed to set window icon: {e}")
             
         self.root.position_center()
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
         # Initialize statistics first
         self.stats = Statistics()
-        self.setup_tray_icon()
+        
+        # Setup all required variables and resources first
         self.setup_variables()
         self.setup_placeholder_images()
         self.setup_animations()
@@ -402,60 +292,15 @@ class ModernPushupApp:
         self.notification_service = NotificationService(self.settings, self.stats, self.root, self.update_statistics)
         self.reminder_service = ReminderService(self.settings, self.notification_service)
         
-        # Create GUI after all initializations
+        # Create GUI after all resources are initialized
         self.create_gui()
         
-        # Check for updates if enabled
-        if self.settings.auto_update:
-            self.check_for_updates()
-    
-    def check_for_updates(self):
-        """Check for available updates"""
-        def perform_check():
-            has_update, new_version, download_url = self.update_service.check_for_updates()
-            if has_update:
-                self.root.after(0, lambda: self.show_update_dialog(new_version, download_url))
+        # Bind the close button event
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
-        # Run check in background thread
-        threading.Thread(target=perform_check, daemon=True).start()
-    
-    def show_update_dialog(self, new_version: str, download_url: str):
-        """Show update available dialog"""
-        response = messagebox.askyesno(
-            "Update Available",
-            f"Version {new_version} is available!\n\n"
-            "Would you like to update now?",
-            icon='info'
-        )
+        # Setup system tray icon
+        self.setup_tray_icon()
         
-        if response:
-            self.install_update(download_url)
-    
-    def install_update(self, download_url: str):
-        """Install the update"""
-        progress = ttk.Toplevel(self.root)
-        progress.title("Updating...")
-        progress.geometry("300x100")
-        
-        label = ttk.Label(
-            progress,
-            text="Downloading update...\nApplication will restart automatically.",
-            justify='center'
-        )
-        label.pack(pady=20)
-        
-        def update_callback(message):
-            label.configure(text=message)
-        
-        def perform_update():
-            if self.update_service.download_and_install_update(
-                download_url,
-                callback=update_callback
-            ):
-                self.root.quit()
-        
-        threading.Thread(target=perform_update, daemon=True).start()
-
     def setup_tray_icon(self):
         """Setup system tray icon and menu"""
         # Create tray icon image
@@ -469,12 +314,12 @@ class ModernPushupApp:
         def restore_window(icon, item):
             self.root.deiconify()  # Restore the window
             self.root.lift()  # Bring to front
-
+        
         def exit_app(icon, item):
             icon.stop()  # Stop the tray icon
             self.reminder_service.stop()  # Stop reminders
             self.root.destroy()  # Close the app
-            
+        
         # Create tray icon menu
         menu = (
             pystray.MenuItem("Open", restore_window),
@@ -487,7 +332,6 @@ class ModernPushupApp:
             "Pushup Reminder",
             menu
         )
-        
         # Run tray icon in separate thread
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
         
@@ -498,11 +342,11 @@ class ModernPushupApp:
             "Would you like to minimize to tray instead of closing?",
             icon='question'
         )
-        
+        # Stop any running reminders
         if response:  # Yes clicked - minimize
             self.root.withdraw()  # Hide the window
             # Show notification that app is minimized WITHOUT showing completion dialog
-            self.notification_service.notify_minimize(  # New method
+            self.notification_service.notify_minimize(
                 "Pushup Reminder",
                 "Application minimized to tray. Still running!"
             )
@@ -518,7 +362,7 @@ class ModernPushupApp:
         self.progress_var = tk.DoubleVar(value=0)
         self.daily_goal_var = tk.IntVar(value=self.settings.daily_goal)
         self.is_running = False
-
+        
     def setup_placeholder_images(self):
         """Load images from assets folder"""
         self.images = {}
@@ -556,18 +400,18 @@ class ModernPushupApp:
                 
                 # Convert to PhotoImage
                 self.images[name] = ImageTk.PhotoImage(img)
-                
             except Exception as e:
                 print(f"Failed to load image {filename}: {e}")
                 # Create placeholder on error
                 size = (64, 64) if name == "logo" else (24, 24)
                 img = Image.new('RGBA', size, "#808080")  # Gray placeholder with alpha
                 self.images[name] = ImageTk.PhotoImage(img)
-
+        
     def create_gui(self):
         # Create main container with padding
         self.main_container = ttk.Frame(self.root, padding="20")
         self.main_container.pack(fill=tk.BOTH, expand=True)
+        
         self.create_header()
         self.create_main_content()
         self.create_footer()
@@ -606,7 +450,6 @@ class ModernPushupApp:
         # Right panel - Statistics
         self.right_panel = ttk.Frame(content)
         self.right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
-        
         # Statistics header
         ttk.Label(
             self.right_panel,
@@ -728,7 +571,7 @@ class ModernPushupApp:
         if not self.is_running:
             try:
                 pushups = self.pushups_var.get()
-                if (pushups <= 0):
+                if pushups <= 0:
                     messagebox.showerror("Error", "Number of pushups must be greater than 0!")
                     return
                 self.reminder_service.start()
@@ -788,60 +631,6 @@ class ModernPushupApp:
             last_time = self.stats.last_completion.strftime("%I:%M %p")
             self.last_completion_label.configure(
                 text=f"Last Completed: {last_time}"
-            )
-
-        # Check if daily goal is reached
-        if self.stats.check_daily_goal(self.settings.daily_goal) and self.is_running:
-            self.reminder_service.stop()
-            self.is_running = False
-            self.toggle_btn.configure(
-                text="Start Reminder",
-                style="success.TButton"
-            )
-            self.status_label.configure(text="Daily goal reached!")
-            self.show_goal_completion_dialog()
-
-    def show_goal_completion_dialog(self):
-        """Show dialog when daily goal is reached"""
-        response = messagebox.askyesno(
-            "Congratulations! 🎉",
-            f"You've reached your daily goal of {self.settings.daily_goal} pushups!\n\n"
-            "Would you like to set a new goal for today?",
-            icon='info'
-        )
-        
-        if response:  # User wants to set new goal
-            new_goal = simpledialog.askinteger(
-                "New Daily Goal",
-                "Enter your new daily goal:",
-                parent=self.root,
-                minvalue=self.settings.daily_goal + 1,
-                initialvalue=self.settings.daily_goal + 20
-            )
-            
-            if new_goal:
-                self.settings.daily_goal = new_goal
-                self.settings.save()
-                self.daily_goal_var.set(new_goal)
-                
-                if messagebox.askyesno(
-                    "Resume Training",
-                    "Would you like to resume your training with the new goal?",
-                    icon='question'
-                ):
-                    self.toggle_reminder()  # Restart the reminder
-                else:
-                    messagebox.showinfo(
-                        "Training Complete",
-                        "Great job today! Take a rest and come back stronger tomorrow! 💪",
-                        icon='info'
-                    )
-        else:
-            messagebox.showinfo(
-                "Training Complete",
-                "Amazing work! You've crushed your goal for today! 🏆\n"
-                "Get some rest and come back tomorrow for more gains! 💪",
-                icon='info'
             )
 
     def create_left_panel(self, content):
@@ -909,66 +698,31 @@ class SettingsWindow:
         self.settings = settings
         self.window = ttk.Toplevel(parent)
         self.window.title("Settings")
-        self.window.geometry("500x800")  # Increased window size
-        self.window.resizable(True, True)  # Made resizable
-        
-        # Create scrollable container
-        canvas = ttk.Canvas(self.window)
-        scrollbar = ttk.Scrollbar(self.window, orient="vertical", command=canvas.yview)
-        self.container = ttk.Frame(canvas)
-        
-        # Configure canvas
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        # Pack scrollbar and canvas
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Create window in canvas
-        canvas_window = canvas.create_window((0, 0), window=self.container, anchor="nw")
-        
-        # Configure canvas scrolling
-        def configure_scroll_region(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-        
-        def configure_window_size(event):
-            canvas.itemconfig(canvas_window, width=event.width)
-        
-        self.container.bind("<Configure>", configure_scroll_region)
-        canvas.bind("<Configure>", configure_window_size)
-        
-        # Add mousewheel scrolling
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        
-        # Create preview frame first
+        self.window.geometry("400x600")
+        self.window.resizable(False, False)
         self.preview_style = ttk.Style()
         self.create_settings_form()
         
-        # Initialize pygame mixer
-        pygame.mixer.init()
-        
     def create_settings_form(self):
-        # Use self.container instead of creating a new container
-        self.container.configure(padding="20")
+        container = ttk.Frame(self.window, padding="20")
+        container.pack(fill=tk.BOTH, expand=True)
         
         # Theme selection with live preview
-        ttk.Label(self.container, text="Theme", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        ttk.Label(container, text="Theme", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
         theme_var = tk.StringVar(value=self.settings.theme)
         
         # Create preview frame
-        preview_frame = ttk.LabelFrame(self.container, text="Theme Preview", padding=10)
+        preview_frame = ttk.LabelFrame(container, text="Theme Preview", padding=10)
         preview_frame.pack(fill=tk.X, pady=(0, 20))
         
         # Update theme preview when radio button is selected
         def on_theme_change():
             self.preview_style.theme_use(theme_var.get())
+        
         # Create radio buttons for each theme
         for theme in Theme:
             ttk.Radiobutton(
-                self.container,
+                container,
                 text=theme.value.capitalize(),
                 value=theme.value,
                 variable=theme_var,
@@ -977,8 +731,9 @@ class SettingsWindow:
             ).pack(anchor=tk.W, pady=2)
 
         # Interval settings
-        ttk.Label(self.container, text="Reminder Interval", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
-        interval_frame = ttk.Frame(self.container)
+        ttk.Label(container, text="Reminder Interval", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        
+        interval_frame = ttk.Frame(container)
         interval_frame.pack(fill=tk.X, pady=(0, 20))
         
         # Hours
@@ -995,98 +750,27 @@ class SettingsWindow:
         minutes_var = tk.IntVar(value=self.settings.interval_minutes)
         ttk.Entry(minutes_frame, textvariable=minutes_var, width=5).pack()
         
-        # Notification sound
-        ttk.Label(self.container, text="Notifications", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
-        sound_var = tk.StringVar(value=self.settings.notification_sound)
-        
-        # Sound settings
-        ttk.Label(self.container, text="Notification Sound", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(20, 10))
-        
-        sounds_frame = ttk.LabelFrame(self.container, text="Choose Sound", padding=10)
-        sounds_frame.pack(fill=tk.X, pady=(0, 20))
-        
-        # Default sounds
-        sounds_dir, default_sounds = setup_sounds_directory()
-        for sound_name in default_sounds.keys():
-            ttk.Radiobutton(
-                sounds_frame,
-                text=sound_name.replace('_', ' ').capitalize(),
-                value=sound_name,
-                variable=sound_var,
-                command=lambda s=sound_name: self.play_sound(sounds_dir / f"{s}.wav"),
-                style="TRadiobutton"
-            ).pack(anchor=tk.W, pady=2)
-        
-        # Custom sound section
-        custom_frame = ttk.Frame(sounds_frame)
-        custom_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        def browse_sound():
-            file_path = filedialog.askopenfilename(
-                title="Select Sound File",
-                filetypes=[("Sound Files", "*.wav *.mp3")],
-                initialdir=str(Path.home())
-            )
-            if file_path:
-                try:
-                    sound_path = Path(file_path)
-                    # Check file size
-                    if sound_path.stat().st_size > AppSettings.MAX_SOUND_SIZE:
-                        messagebox.showerror("Error", "Sound file must be smaller than 1MB")
-                        return
-                    # Check extension
-                    if sound_path.suffix.lower() not in AppSettings.ALLOWED_EXTENSIONS:
-                        messagebox.showerror("Error", "Only .wav and .mp3 files are supported")
-                        return
-                    # Copy file to sounds directory
-                    import shutil
-                    shutil.copy2(file_path, dest_path)
-                    
-                    self.settings.custom_sound_path = str(dest_path)
-                    sound_var.set("custom")
-                    self.play_sound(dest_path)
-                    
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to add sound file: {e}")
-        
-        ttk.Button(
-            custom_frame,
-            text="Add Custom Sound",
-            command=browse_sound,
-            style="TButton"
-        ).pack(side=tk.LEFT, padx=5)
-        
-        ttk.Radiobutton(
-            custom_frame,
-            text="Use Custom Sound",
-            value="custom",
-            variable=sound_var,
-            state="disabled" if not self.settings.custom_sound_path else "normal",
-            command=lambda: self.play_sound(Path(self.settings.custom_sound_path)),
-            style="TRadiobutton",
-        ).pack(side=tk.LEFT, padx=5)
-        
         # Daily goal
-        ttk.Label(self.container, text="Daily Goal", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(20, 10))
+        ttk.Label(container, text="Daily Goal", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(20, 10))
         goal_var = tk.IntVar(value=self.settings.daily_goal)
-        ttk.Entry(self.container, textvariable=goal_var).pack(fill=tk.X)
+        ttk.Entry(container, textvariable=goal_var).pack(fill=tk.X)
         
-        # Add auto-update toggle
+        # Add auto-update toggle before buttons
         ttk.Label(
-            self.container,
+            container,
             text="Updates",
             font=("Segoe UI", 12, "bold")
         ).pack(anchor=tk.W, pady=(20, 10))
         
         auto_update_var = tk.BooleanVar(value=self.settings.auto_update)
         ttk.Checkbutton(
-            self.container,
+            container,
             text="Check for updates automatically",
             variable=auto_update_var
         ).pack(anchor=tk.W)
         
         # Button frame at the bottom (move this to the end)
-        button_frame = ttk.Frame(self.container)
+        button_frame = ttk.Frame(container)
         button_frame.pack(fill=tk.X, pady=(20, 0))
         
         # Cancel button
@@ -1106,13 +790,12 @@ class SettingsWindow:
                 hours_var.get(),
                 minutes_var.get(),
                 theme_var.get(),
-                sound_var.get(),
                 goal_var.get(),
-                auto_update_var.get()
+                auto_update_var.get()  # Add auto_update to save parameters
             )
         ).pack(side=tk.RIGHT, padx=5)
-
-    def save_settings(self, hours, minutes, theme, sound, goal, auto_update):
+        
+    def save_settings(self, hours, minutes, theme, goal, auto_update):
         """Save settings handler"""
         try:
             old_theme = self.settings.theme
@@ -1121,53 +804,32 @@ class SettingsWindow:
             self.settings.interval_hours = hours
             self.settings.interval_minutes = minutes
             self.settings.theme = theme
-            self.settings.notification_sound = sound
             self.settings.daily_goal = goal
-            self.settings.auto_update = auto_update
+            self.settings.auto_update = auto_update  # Save auto_update setting
             self.settings.save()
-            
             theme_changed = old_theme != theme
             if theme_changed:
                 if messagebox.askyesno(
                     "Restart Required",
                     "Theme changes require a restart. Would you like to restart now?"
                 ):
-                    self.stop_sound()
                     self.window.destroy()
                     self.parent.destroy()
                     self.parent.after_idle(main)
                 else:
-                    self.stop_sound()
                     self.window.destroy()
                     messagebox.showinfo(
                         "Settings Saved",
                         "Changes will take effect after restart."
                     )
             else:
-                self.stop_sound()
                 self.window.destroy()
                 messagebox.showinfo("Success", "Settings saved successfully!")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save settings: {e}")
 
-    def play_sound(self, sound_path):
-        """Play the selected sound"""
-        try:
-            if pygame.mixer.music.get_busy():
-                pygame.mixer.music.stop()
-            pygame.mixer.music.load(str(sound_path))
-            pygame.mixer.music.play()
-        except Exception as e:
-            print(f"Failed to play sound: {e}")
-    
-    def stop_sound(self):
-        """Stop any playing sound"""
-        if pygame.mixer.music.get_busy():
-            pygame.mixer.music.stop()
-
     def close_window(self):
         """Handle window close"""
-        self.stop_sound()
         self.window.destroy()
 
 class CompletionDialog:
@@ -1181,7 +843,6 @@ class CompletionDialog:
         self.pushups = pushups
         self.stats = stats
         self.update_callback = update_callback  # Add callback for updates
-        
         self.create_dialog()
         
     def create_dialog(self):
@@ -1247,18 +908,6 @@ class CompletionDialog:
         self.stats.add_pushups(count)
         self.update_callback()  # Call the update function
         self.window.destroy()
-
-def setup_sounds_directory():
-    sounds_dir = Path(__file__).parent / 'assets' / 'sounds'
-    sounds_dir.mkdir(parents=True, exist_ok=True)
-    # Default sounds dictionary with names and sources
-    default_sounds = {
-        "Default": "mixkit-software-interface-start-2574.wav",
-        "Rain": "mixkit-rain-in-the-forest-2337.wav",
-        "Guitar_up": "mixkit-guitar-stroke-up-slow-2338.wav",
-        "Guitar_down": "mixkit-guitar-stroke-down-slow-2339.wav",
-    }
-    return sounds_dir, default_sounds
 
 def main():
     app = ModernPushupApp()

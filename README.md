@@ -1,6 +1,6 @@
-# Pushup Reminder Pro v1.6
+# Pushup Reminder Pro v1.7
 
-Release Date: March 14, 2024
+Release Date: February 17, 2025
 
 A modern desktop application to help you maintain a regular pushup routine with customizable reminders and statistics tracking.
 
@@ -9,12 +9,11 @@ A modern desktop application to help you maintain a regular pushup routine with 
 - Customizable pushup reminder intervals
 - Daily goals and progress tracking
 - Statistics dashboard with streaks
-- Multiple notification themes and sounds
+- Multiple notification themes
 - System tray support
 - Modern UI with multiple themes
 - Automatic updates with toggle option
 - Progress animations
-- Custom sound support
 - Daily statistics tracking
 - Auto-start option
 
@@ -75,11 +74,6 @@ pushup-reminder/
     │   ├── pushup.png
     │   ├── settings.png
     │   └── stats.png
-    └── sounds/
-        ├── default.wav
-        ├── guitar_down.wav
-        ├── guitar_up.wav
-        └── rain.wav
 ```
 
 ## Configuration
@@ -89,15 +83,8 @@ The application automatically creates a configuration file at:
 
 ## Version History
 
-- v1.6 (Current)
+- v1.7 (Current)
   - Added automatic updates with toggle option
-
-- v1.5
-  - Fixed notification system reliability
-  - Added COM initialization for Windows notifications
-  - Added fallback notification method
-  - Fixed completion dialog display issues
-  - Added developer credits
 
 - v1.4
   - Added custom sound support
