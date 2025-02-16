@@ -17,6 +17,9 @@ from tkinter import simpledialog
 import pystray
 import win32com.client
 import pythoncom
+import requests
+import sys
+from packaging import version  # Add this import
 
 App_Version = "Pushup Reminder Pro v1.7"
 
@@ -257,9 +260,55 @@ class ReminderService:
         remaining = max(0, interval - int(elapsed))
         return remaining
 
+class UpdateService:
+    def __init__(self, current_version: str):
+        # Clean up version string to keep only numbers and dots
+        self.current_version = ''.join(c for c in current_version if c.isdigit() or c == '.')
+        self.github_repo = "ossama21/PushUps_Reminder"
+        self.github_api = f"https://api.github.com/repos/{self.github_repo}/releases/latest"
+        
+    def check_for_updates(self) -> tuple[bool, Optional[str], Optional[str]]:
+        """Check if updates are available
+        Returns: (update_available, version, download_url)"""
+        try:
+            headers = {'Accept': 'application/vnd.github.v3+json'}
+            response = requests.get(self.github_api, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            release_data = response.json()
+            # Clean up version string from tag name
+            latest_version = ''.join(
+                c for c in release_data['tag_name'] 
+                if c.isdigit() or c == '.'
+            )
+            download_url = None
+            
+            # Find the appropriate asset
+            for asset in release_data.get('assets', []):
+                if asset['name'].endswith('.exe'):
+                    download_url = asset['browser_download_url']
+                    break
+            
+            try:
+                has_update = version.parse(latest_version) > version.parse(self.current_version)
+            except version.InvalidVersion:
+                print(f"Invalid version format: current={self.current_version}, latest={latest_version}")
+                raise ValueError("Invalid version format")
+            
+            return has_update, latest_version, download_url
+            
+        except requests.RequestException as e:
+            print(f"Network error checking for updates: {e}")
+            raise ConnectionError("Failed to connect to update server")
+        except Exception as e:
+            print(f"Error checking for updates: {e}")
+            raise
+
 class ModernPushupApp:
     def __init__(self):
         self.settings = AppSettings.load()
+        # Add UpdateService initialization before creating main window
+        self.update_service = UpdateService(App_Version.split()[-1])
         
         # Create the main window with ttkbootstrap
         self.root = ttk.Window(
@@ -593,7 +642,8 @@ class ModernPushupApp:
             self.status_label.configure(text="Reminder stopped")
             
     def open_settings(self):
-        SettingsWindow(self.root, self.settings)
+        # Pass self instead of self.root to provide access to update_service
+        SettingsWindow(self, self.settings)
         
     def run(self):
         self.root.mainloop()
@@ -694,11 +744,11 @@ class ModernPushupApp:
 
 class SettingsWindow:
     def __init__(self, parent, settings: AppSettings):
-        self.parent = parent
+        self.parent = parent  # parent is now ModernPushupApp instance
         self.settings = settings
-        self.window = ttk.Toplevel(parent)
+        self.window = ttk.Toplevel(parent.root)  # Use parent.root for the window parent
         self.window.title("Settings")
-        self.window.geometry("400x600")
+        self.window.geometry("400x700")
         self.window.resizable(False, False)
         self.preview_style = ttk.Style()
         self.create_settings_form()
@@ -769,6 +819,69 @@ class SettingsWindow:
             variable=auto_update_var
         ).pack(anchor=tk.W)
         
+        # Updates section with check now button
+        updates_frame = ttk.LabelFrame(container, text="Updates", padding=10)
+        updates_frame.pack(fill=tk.X, pady=(20, 10))
+        
+        auto_update_var = tk.BooleanVar(value=self.settings.auto_update)
+        ttk.Checkbutton(
+            updates_frame,
+            text="Check for updates automatically",
+            variable=auto_update_var
+        ).pack(anchor=tk.W)
+        
+        def check_updates_now():
+            check_btn.configure(state="disabled", text="Checking...")
+            self.window.update()
+            
+            def perform_check():
+                try:
+                    # Now we can access update_service through parent
+                    has_update, new_version, download_url = self.parent.update_service.check_for_updates()
+                    if has_update:
+                        if messagebox.askyesno(
+                            "Update Available",
+                            f"Version {new_version} is available!\n\n"
+                            "Would you like to download and install it now?",
+                            parent=self.window
+                        ):
+                            # Handle update installation
+                            pass
+                    else:
+                        messagebox.showinfo(
+                            "No Updates",
+                            "You are running the latest version!",
+                            parent=self.window
+                        )
+                except ConnectionError:
+                    messagebox.showerror(
+                        "Update Check Failed",
+                        "Failed to check for updates.\n"
+                        "Please check your internet connection.",
+                        parent=self.window
+                    )
+                except Exception as e:
+                    messagebox.showerror(
+                        "Update Check Failed",
+                        f"An error occurred: {str(e)}",
+                        parent=self.window
+                    )
+                finally:
+                    self.window.after(0, lambda: check_btn.configure(
+                        state="normal",
+                        text="Check for Updates Now"
+                    ))
+            
+            threading.Thread(target=perform_check, daemon=True).start()
+        
+        check_btn = ttk.Button(
+            updates_frame,
+            text="Check for Updates Now",
+            style="info.TButton",
+            command=check_updates_now
+        )
+        check_btn.pack(pady=(5, 0))
+
         # Button frame at the bottom (move this to the end)
         button_frame = ttk.Frame(container)
         button_frame.pack(fill=tk.X, pady=(20, 0))
@@ -791,7 +904,7 @@ class SettingsWindow:
                 minutes_var.get(),
                 theme_var.get(),
                 goal_var.get(),
-                auto_update_var.get()  # Add auto_update to save parameters
+                auto_update_var.get()
             )
         ).pack(side=tk.RIGHT, padx=5)
         
