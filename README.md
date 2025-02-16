@@ -1,6 +1,6 @@
-# Pushup Reminder Pro v1.7
+# Pushup Reminder Pro v1.8
 
-Release Date: February 17, 2025
+Release Date: March 18, 2024
 
 A modern desktop application to help you maintain a regular pushup routine with customizable reminders and statistics tracking.
 
@@ -22,6 +22,7 @@ A modern desktop application to help you maintain a regular pushup routine with 
 - Python 3.8+
 - Windows 10/11 (for native notifications)
 - Internet connection (for auto-updates)
+- Git (optional, for development)
 
 ## Installation
 
@@ -83,7 +84,10 @@ The application automatically creates a configuration file at:
 
 ## Version History
 
-- v1.7 (Current)
+- v1.8 (Current)
+  - Updated README to version 1.8
+
+- v1.7
   - Added automatic updates with toggle option
 
 - v1.6
