@@ -86,7 +86,7 @@ The application automatically creates a configuration file at:
 - v1.7 (Current)
   - Added automatic updates with toggle option
 
-- v1.6 (Current)
+- v1.6
   - Added automatic updates with toggle option
 
 - v1.5
