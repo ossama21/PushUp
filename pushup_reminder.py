@@ -128,6 +128,10 @@ class Statistics:
         self.last_completion = None
         self.save_stats()
 
+    def check_daily_goal(self, goal: int) -> bool:
+        """Check if daily goal is reached"""
+        return self.today_pushups >= goal
+
 class NotificationService:
     def __init__(self, settings: AppSettings, stats: Statistics, root: ttk.Window, update_callback):
         self.settings = settings
@@ -136,6 +140,8 @@ class NotificationService:
         self.toaster = ToastNotifier()
         self.update_callback = update_callback
         pygame.mixer.init()
+        # Initialize COM for this thread
+        pythoncom.CoInitialize()
     
     def notify_minimize(self, title: str, message: str):
         """Send notification without completion dialog"""
@@ -144,17 +150,27 @@ class NotificationService:
             if not Path(icon_path).exists():
                 icon_path = str(Path(__file__).parent / 'assets' / 'icons' / 'logo.png')
             
-            self.toaster.show_toast(
-                title,
-                message,
-                icon_path=icon_path if Path(icon_path).exists() else None,
-                duration=5,
-                threaded=True
-            )
-            # Play notification sound without showing completion dialog
+            # Try shell popup first
+            try:
+                pythoncom.CoInitialize()
+                shell = win32com.client.Dispatch("WScript.Shell")
+                shell.Popup(message, 0, title, 64)
+                pythoncom.CoUninitialize()
+            except:
+                # Fallback to win10toast
+                self.toaster.show_toast(
+                    title,
+                    message,
+                    icon_path=icon_path if Path(icon_path).exists() else None,
+                    duration=5,
+                    threaded=True
+                )
+            
+            # Play notification sound
             self.play_notification_sound()
+            
         except Exception as e:
-            print(f"Failed to send notification: {e}")
+            print(f"Failed to send minimize notification: {e}")
 
     def notify(self, title: str, message: str):
         """Send a Windows notification and show completion dialog"""
@@ -163,23 +179,33 @@ class NotificationService:
             if not Path(icon_path).exists():
                 icon_path = str(Path(__file__).parent / 'assets' / 'icons' / 'logo.png')
             
-            # Make sure we're initialized for COM
-            pythoncom.CoInitialize()
-            
-            # Use win32com for Windows notifications with custom sound
-            notification = win32com.client.Dispatch("WScript.Shell")
+            # Play notification sound first
             self.play_notification_sound()
             
             # Show the toast notification without Windows sound
-            self.toaster.show_toast(
-                title,
-                message,
-                icon_path=icon_path if Path(icon_path).exists() else None,
-                duration=5,
-                threaded=True
-            )
+            try:
+                # Create shell object in the same thread
+                pythoncom.CoInitialize()
+                shell = win32com.client.Dispatch("WScript.Shell")
+                shell.Popup(
+                    message,
+                    0,  # Wait time (0 = don't wait)
+                    title,
+                    64  # Information icon
+                )
+                pythoncom.CoUninitialize()
+            except:
+                # Fallback to win10toast if shell popup fails
+                self.toaster.show_toast(
+                    title,
+                    message,
+                    icon_path=icon_path if Path(icon_path).exists() else None,
+                    duration=5,
+                    threaded=True
+                )
+            
             # Show completion dialog after notification
-            self.root.after(5000, lambda: CompletionDialog(
+            self.root.after(2000, lambda: CompletionDialog(
                 self.root,
                 self.settings.pushups,
                 self.stats,
@@ -188,18 +214,13 @@ class NotificationService:
             
         except Exception as e:
             print(f"Failed to send notification: {e}")
-            # Try fallback notification method
-            self.toaster.show_toast(
-                title,
-                message,
-                duration=5,
-                threaded=True
-            )
-        finally:
-            try:
-                pythoncom.CoUninitialize()
-            except:
-                pass
+            # Final fallback - just show the completion dialog
+            self.root.after(1000, lambda: CompletionDialog(
+                self.root,
+                self.settings.pushups,
+                self.stats,
+                self.update_callback
+            ))
 
     def play_notification_sound(self):
         """Play the selected notification sound"""
@@ -641,6 +662,60 @@ class ModernPushupApp:
             last_time = self.stats.last_completion.strftime("%I:%M %p")
             self.last_completion_label.configure(
                 text=f"Last Completed: {last_time}"
+            )
+
+        # Check if daily goal is reached
+        if self.stats.check_daily_goal(self.settings.daily_goal) and self.is_running:
+            self.reminder_service.stop()
+            self.is_running = False
+            self.toggle_btn.configure(
+                text="Start Reminder",
+                style="success.TButton"
+            )
+            self.status_label.configure(text="Daily goal reached!")
+            self.show_goal_completion_dialog()
+
+    def show_goal_completion_dialog(self):
+        """Show dialog when daily goal is reached"""
+        response = messagebox.askyesno(
+            "Congratulations! 🎉",
+            f"You've reached your daily goal of {self.settings.daily_goal} pushups!\n\n"
+            "Would you like to set a new goal for today?",
+            icon='info'
+        )
+        
+        if response:  # User wants to set new goal
+            new_goal = simpledialog.askinteger(
+                "New Daily Goal",
+                "Enter your new daily goal:",
+                parent=self.root,
+                minvalue=self.settings.daily_goal + 1,
+                initialvalue=self.settings.daily_goal + 20
+            )
+            
+            if new_goal:
+                self.settings.daily_goal = new_goal
+                self.settings.save()
+                self.daily_goal_var.set(new_goal)
+                
+                if messagebox.askyesno(
+                    "Resume Training",
+                    "Would you like to resume your training with the new goal?",
+                    icon='question'
+                ):
+                    self.toggle_reminder()  # Restart the reminder
+                else:
+                    messagebox.showinfo(
+                        "Training Complete",
+                        "Great job today! Take a rest and come back stronger tomorrow! 💪",
+                        icon='info'
+                    )
+        else:
+            messagebox.showinfo(
+                "Training Complete",
+                "Amazing work! You've crushed your goal for today! 🏆\n"
+                "Get some rest and come back tomorrow for more gains! 💪",
+                icon='info'
             )
 
     def create_left_panel(self, content):
