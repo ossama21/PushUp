@@ -1,6 +1,6 @@
 # Pushup Reminder Pro v1.4
 
-Release Date: March 14, 2024
+Release Date: 16th February 2025
 
 A modern desktop application to help you maintain a regular pushup routine with customizable reminders and statistics tracking.
 
