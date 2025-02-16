@@ -20,8 +20,15 @@ import pygame
 from tkinter import filedialog
 import win32com.client
 import pythoncom
+# Add new imports
+import requests
+import os
+import tempfile
+import subprocess
+from packaging import version
+import shutil
 
-App_Version = "Pushup Reminder Pro v1.5"
+App_Version = "Pushup Reminder Pro v1.6"
 
 # Valid themes for ttkbootstrap
 class Theme(Enum):
@@ -49,6 +56,7 @@ class AppSettings:
     daily_goal: int = 100
     rest_duration: int = 60
     pushup_animation: bool = True
+    auto_update: bool = True  # New setting for auto-update
     
     # Add validation for sound files
     MAX_SOUND_SIZE = 1024 * 1024  # 1MB limit
@@ -294,9 +302,76 @@ class ReminderService:
         remaining = max(0, interval - int(elapsed))
         return remaining
 
+class UpdateService:
+    def __init__(self, current_version: str):
+        self.current_version = current_version
+        self.github_repo = "ossama21/PushUps_Reminder "  # Replace with your repo
+        self.github_api = f"https://api.github.com/ossama21/PushUps_Reminder/releases/latest"
+        
+    def check_for_updates(self) -> tuple[bool, Optional[str], Optional[str]]:
+        """Check if updates are available
+        Returns: (update_available, version, download_url)"""
+        try:
+            response = requests.get(self.github_api)
+            if response.status_code == 200:
+                release_data = response.json()
+                latest_version = release_data['tag_name'].lstrip('v')
+                download_url = release_data['assets'][0]['browser_download_url']
+                
+                if version.parse(latest_version) > version.parse(self.current_version):
+                    return True, latest_version, download_url
+            
+            return False, None, None
+        except Exception as e:
+            print(f"Failed to check for updates: {e}")
+            return False, None, None
+    
+    def download_and_install_update(self, download_url: str, callback=None) -> bool:
+        """Download and install the update"""
+        try:
+            # Download the new version
+            response = requests.get(download_url, stream=True)
+            if response.status_code != 200:
+                return False
+                
+            # Create temp directory
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Download file
+                temp_file = os.path.join(temp_dir, "update.exe")
+                with open(temp_file, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                
+                # Create update script
+                script_path = os.path.join(temp_dir, "update.bat")
+                current_exe = sys.executable
+                with open(script_path, 'w') as f:
+                    f.write(f'''@echo off
+timeout /t 2 /nobreak
+copy /Y "{temp_file}" "{current_exe}"
+start "" "{current_exe}"
+del "%~f0"
+''')
+                
+                # Run update script
+                subprocess.Popen(['cmd', '/c', script_path], 
+                               creationflags=subprocess.CREATE_NO_WINDOW,
+                               close_fds=True)
+                return True
+                
+        except Exception as e:
+            print(f"Failed to install update: {e}")
+            if callback:
+                callback(f"Update failed: {e}")
+            return False
+
 class ModernPushupApp:
     def __init__(self):
         self.settings = AppSettings.load()
+        # Initialize update service
+        self.update_service = UpdateService(App_Version.split()[-1])
+        
         # Create the main window with ttkbootstrap
         self.root = ttk.Window(
             title="Pushup Reminder Pro",
@@ -330,6 +405,57 @@ class ModernPushupApp:
         # Create GUI after all initializations
         self.create_gui()
         
+        # Check for updates if enabled
+        if self.settings.auto_update:
+            self.check_for_updates()
+    
+    def check_for_updates(self):
+        """Check for available updates"""
+        def perform_check():
+            has_update, new_version, download_url = self.update_service.check_for_updates()
+            if has_update:
+                self.root.after(0, lambda: self.show_update_dialog(new_version, download_url))
+        
+        # Run check in background thread
+        threading.Thread(target=perform_check, daemon=True).start()
+    
+    def show_update_dialog(self, new_version: str, download_url: str):
+        """Show update available dialog"""
+        response = messagebox.askyesno(
+            "Update Available",
+            f"Version {new_version} is available!\n\n"
+            "Would you like to update now?",
+            icon='info'
+        )
+        
+        if response:
+            self.install_update(download_url)
+    
+    def install_update(self, download_url: str):
+        """Install the update"""
+        progress = ttk.Toplevel(self.root)
+        progress.title("Updating...")
+        progress.geometry("300x100")
+        
+        label = ttk.Label(
+            progress,
+            text="Downloading update...\nApplication will restart automatically.",
+            justify='center'
+        )
+        label.pack(pady=20)
+        
+        def update_callback(message):
+            label.configure(text=message)
+        
+        def perform_update():
+            if self.update_service.download_and_install_update(
+                download_url,
+                callback=update_callback
+            ):
+                self.root.quit()
+        
+        threading.Thread(target=perform_update, daemon=True).start()
+
     def setup_tray_icon(self):
         """Setup system tray icon and menu"""
         # Create tray icon image
@@ -913,7 +1039,6 @@ class SettingsWindow:
                         messagebox.showerror("Error", "Only .wav and .mp3 files are supported")
                         return
                     # Copy file to sounds directory
-                    dest_path = sounds_dir / sound_path.name
                     import shutil
                     shutil.copy2(file_path, dest_path)
                     
@@ -946,6 +1071,20 @@ class SettingsWindow:
         goal_var = tk.IntVar(value=self.settings.daily_goal)
         ttk.Entry(self.container, textvariable=goal_var).pack(fill=tk.X)
         
+        # Add auto-update toggle
+        ttk.Label(
+            self.container,
+            text="Updates",
+            font=("Segoe UI", 12, "bold")
+        ).pack(anchor=tk.W, pady=(20, 10))
+        
+        auto_update_var = tk.BooleanVar(value=self.settings.auto_update)
+        ttk.Checkbutton(
+            self.container,
+            text="Check for updates automatically",
+            variable=auto_update_var
+        ).pack(anchor=tk.W)
+        
         # Button frame at the bottom (move this to the end)
         button_frame = ttk.Frame(self.container)
         button_frame.pack(fill=tk.X, pady=(20, 0))
@@ -968,11 +1107,12 @@ class SettingsWindow:
                 minutes_var.get(),
                 theme_var.get(),
                 sound_var.get(),
-                goal_var.get()
+                goal_var.get(),
+                auto_update_var.get()
             )
         ).pack(side=tk.RIGHT, padx=5)
 
-    def save_settings(self, hours, minutes, theme, sound, goal):
+    def save_settings(self, hours, minutes, theme, sound, goal, auto_update):
         """Save settings handler"""
         try:
             old_theme = self.settings.theme
@@ -983,6 +1123,7 @@ class SettingsWindow:
             self.settings.theme = theme
             self.settings.notification_sound = sound
             self.settings.daily_goal = goal
+            self.settings.auto_update = auto_update
             self.settings.save()
             
             theme_changed = old_theme != theme
