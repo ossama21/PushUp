@@ -301,7 +301,7 @@ class ModernPushupApp:
         self.root = ttk.Window(
             title="Pushup Reminder Pro",
             themename=self.settings.theme,
-            size=(800, 600)
+            size=(900, 700)  # Increased window size
         )
         
         # Set window icon
@@ -783,8 +783,39 @@ class SettingsWindow:
         self.settings = settings
         self.window = ttk.Toplevel(parent)
         self.window.title("Settings")
-        self.window.geometry("400x750")
-        self.window.resizable(False, False)
+        self.window.geometry("500x800")  # Increased window size
+        self.window.resizable(True, True)  # Made resizable
+        
+        # Create scrollable container
+        canvas = ttk.Canvas(self.window)
+        scrollbar = ttk.Scrollbar(self.window, orient="vertical", command=canvas.yview)
+        self.container = ttk.Frame(canvas)
+        
+        # Configure canvas
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack scrollbar and canvas
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Create window in canvas
+        canvas_window = canvas.create_window((0, 0), window=self.container, anchor="nw")
+        
+        # Configure canvas scrolling
+        def configure_scroll_region(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        def configure_window_size(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        
+        self.container.bind("<Configure>", configure_scroll_region)
+        canvas.bind("<Configure>", configure_window_size)
+        
+        # Add mousewheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
         
         # Create preview frame first
         self.preview_style = ttk.Style()
@@ -794,15 +825,15 @@ class SettingsWindow:
         pygame.mixer.init()
         
     def create_settings_form(self):
-        container = ttk.Frame(self.window, padding="20")
-        container.pack(fill=tk.BOTH, expand=True)
+        # Use self.container instead of creating a new container
+        self.container.configure(padding="20")
         
         # Theme selection with live preview
-        ttk.Label(container, text="Theme", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        ttk.Label(self.container, text="Theme", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
         theme_var = tk.StringVar(value=self.settings.theme)
         
         # Create preview frame
-        preview_frame = ttk.LabelFrame(container, text="Theme Preview", padding=10)
+        preview_frame = ttk.LabelFrame(self.container, text="Theme Preview", padding=10)
         preview_frame.pack(fill=tk.X, pady=(0, 20))
         
         # Update theme preview when radio button is selected
@@ -811,7 +842,7 @@ class SettingsWindow:
         # Create radio buttons for each theme
         for theme in Theme:
             ttk.Radiobutton(
-                container,
+                self.container,
                 text=theme.value.capitalize(),
                 value=theme.value,
                 variable=theme_var,
@@ -820,8 +851,8 @@ class SettingsWindow:
             ).pack(anchor=tk.W, pady=2)
 
         # Interval settings
-        ttk.Label(container, text="Reminder Interval", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
-        interval_frame = ttk.Frame(container)
+        ttk.Label(self.container, text="Reminder Interval", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        interval_frame = ttk.Frame(self.container)
         interval_frame.pack(fill=tk.X, pady=(0, 20))
         
         # Hours
@@ -839,13 +870,13 @@ class SettingsWindow:
         ttk.Entry(minutes_frame, textvariable=minutes_var, width=5).pack()
         
         # Notification sound
-        ttk.Label(container, text="Notifications", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        ttk.Label(self.container, text="Notifications", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
         sound_var = tk.StringVar(value=self.settings.notification_sound)
         
         # Sound settings
-        ttk.Label(container, text="Notification Sound", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(20, 10))
+        ttk.Label(self.container, text="Notification Sound", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(20, 10))
         
-        sounds_frame = ttk.LabelFrame(container, text="Choose Sound", padding=10)
+        sounds_frame = ttk.LabelFrame(self.container, text="Choose Sound", padding=10)
         sounds_frame.pack(fill=tk.X, pady=(0, 20))
         
         # Default sounds
@@ -911,12 +942,12 @@ class SettingsWindow:
         ).pack(side=tk.LEFT, padx=5)
         
         # Daily goal
-        ttk.Label(container, text="Daily Goal", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(20, 10))
+        ttk.Label(self.container, text="Daily Goal", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(20, 10))
         goal_var = tk.IntVar(value=self.settings.daily_goal)
-        ttk.Entry(container, textvariable=goal_var).pack(fill=tk.X)
+        ttk.Entry(self.container, textvariable=goal_var).pack(fill=tk.X)
         
         # Button frame at the bottom (move this to the end)
-        button_frame = ttk.Frame(container)
+        button_frame = ttk.Frame(self.container)
         button_frame.pack(fill=tk.X, pady=(20, 0))
         
         # Cancel button
