@@ -1,4 +1,4 @@
-# Pushup Reminder Pro v1.4
+# Pushup Reminder Pro v1.5
 
 Release Date: 16th February 2025
 
