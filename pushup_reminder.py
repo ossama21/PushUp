@@ -19,9 +19,9 @@ from pygame import mixer
 import pygame
 from tkinter import filedialog
 import win32com.client
+import pythoncom
 
-App_Version = "Pushup Reminder Pro v1.4"
-
+App_Version = "Pushup Reminder Pro v1.5"
 
 # Valid themes for ttkbootstrap
 class Theme(Enum):
@@ -151,13 +151,11 @@ class NotificationService:
                 duration=5,
                 threaded=True
             )
-            
             # Play notification sound without showing completion dialog
             self.play_notification_sound()
-            
         except Exception as e:
             print(f"Failed to send notification: {e}")
-    
+
     def notify(self, title: str, message: str):
         """Send a Windows notification and show completion dialog"""
         try:
@@ -165,11 +163,11 @@ class NotificationService:
             if not Path(icon_path).exists():
                 icon_path = str(Path(__file__).parent / 'assets' / 'icons' / 'logo.png')
             
-            # Use win32com for Windows notifications with custom sound
-            import win32com.client
-            notification = win32com.client.Dispatch("WScript.Shell")
+            # Make sure we're initialized for COM
+            pythoncom.CoInitialize()
             
-            # Play our custom notification sound first
+            # Use win32com for Windows notifications with custom sound
+            notification = win32com.client.Dispatch("WScript.Shell")
             self.play_notification_sound()
             
             # Show the toast notification without Windows sound
@@ -180,7 +178,6 @@ class NotificationService:
                 duration=5,
                 threaded=True
             )
-            
             # Show completion dialog after notification
             self.root.after(5000, lambda: CompletionDialog(
                 self.root,
@@ -191,12 +188,23 @@ class NotificationService:
             
         except Exception as e:
             print(f"Failed to send notification: {e}")
+            # Try fallback notification method
+            self.toaster.show_toast(
+                title,
+                message,
+                duration=5,
+                threaded=True
+            )
+        finally:
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
 
     def play_notification_sound(self):
         """Play the selected notification sound"""
         try:
             sounds_dir, default_sounds = setup_sounds_directory()
-            
             if self.settings.notification_sound == "custom" and self.settings.custom_sound_path:
                 sound_path = Path(self.settings.custom_sound_path)
             else:
@@ -215,8 +223,8 @@ class ReminderService:
         self.running = False
         self.thread = None
         self.last_reminder = None
-        self.notification_shown = False  # Add this flag
-        
+        self.notification_shown = False
+    
     def _reminder_loop(self):
         """Main reminder loop"""
         while self.running:
@@ -234,7 +242,9 @@ class ReminderService:
                         "Time for Push-ups!",
                         f"Do {self.settings.pushups} push-ups now!"
                     )
-            
+            # Reset notification_shown flag when the interval is complete
+            elif self.notification_shown and (current_time - self.last_reminder) < total_seconds * 0.1:  # Reset in first 10% of new interval
+                self.notification_shown = False
             time.sleep(1)  # Check every second instead of waiting full interval
     
     def start(self):
@@ -256,7 +266,6 @@ class ReminderService:
         """Get remaining time until next reminder in seconds"""
         if not self.running or not self.last_reminder:
             return 0
-            
         interval = (self.settings.interval_hours * 3600 +
                    self.settings.interval_minutes * 60 +
                    self.settings.interval_seconds)
@@ -267,7 +276,6 @@ class ReminderService:
 class ModernPushupApp:
     def __init__(self):
         self.settings = AppSettings.load()
-        
         # Create the main window with ttkbootstrap
         self.root = ttk.Window(
             title="Pushup Reminder Pro",
@@ -286,10 +294,10 @@ class ModernPushupApp:
             print(f"Failed to set window icon: {e}")
             
         self.root.position_center()
-        
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         # Initialize statistics first
         self.stats = Statistics()
-        
+        self.setup_tray_icon()
         self.setup_variables()
         self.setup_placeholder_images()
         self.setup_animations()
@@ -301,12 +309,6 @@ class ModernPushupApp:
         # Create GUI after all initializations
         self.create_gui()
         
-        # Bind the close button event
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
-        # Setup system tray icon
-        self.setup_tray_icon()
-        
     def setup_tray_icon(self):
         """Setup system tray icon and menu"""
         # Create tray icon image
@@ -316,11 +318,11 @@ class ModernPushupApp:
         else:
             # Create a simple colored square if icon doesn't exist
             icon_image = Image.new('RGB', (64, 64), '#4CAF50')
-            
+        
         def restore_window(icon, item):
             self.root.deiconify()  # Restore the window
             self.root.lift()  # Bring to front
-            
+
         def exit_app(icon, item):
             icon.stop()  # Stop the tray icon
             self.reminder_service.stop()  # Stop reminders
@@ -369,7 +371,7 @@ class ModernPushupApp:
         self.progress_var = tk.DoubleVar(value=0)
         self.daily_goal_var = tk.IntVar(value=self.settings.daily_goal)
         self.is_running = False
-        
+
     def setup_placeholder_images(self):
         """Load images from assets folder"""
         self.images = {}
@@ -414,12 +416,11 @@ class ModernPushupApp:
                 size = (64, 64) if name == "logo" else (24, 24)
                 img = Image.new('RGBA', size, "#808080")  # Gray placeholder with alpha
                 self.images[name] = ImageTk.PhotoImage(img)
-        
+
     def create_gui(self):
         # Create main container with padding
         self.main_container = ttk.Frame(self.root, padding="20")
         self.main_container.pack(fill=tk.BOTH, expand=True)
-        
         self.create_header()
         self.create_main_content()
         self.create_footer()
@@ -546,15 +547,27 @@ class ModernPushupApp:
         footer = ttk.Frame(self.main_container)
         footer.pack(fill=tk.X, pady=(20, 0))
         
+        # Add credits frame
+        credits_frame = ttk.Frame(footer)
+        credits_frame.pack(fill=tk.X)
+        
         # Status message
         self.status_label = ttk.Label(
-            footer,
+            credits_frame,
             text="Ready to start",
             font=("Segoe UI", 10)
         )
         self.status_label.pack(side=tk.LEFT)
         
-        # Version
+        # Credits
+        ttk.Label(
+            credits_frame,
+            text="Created by oussamahattan@gmail.com",
+            font=("Segoe UI", 10, "italic"),
+            foreground="#666666"  # Subtle gray color
+        ).pack(side=tk.RIGHT, padx=(0, 10))
+        
+        # Version below credits
         ttk.Label(
             footer,
             text=App_Version,
@@ -568,10 +581,9 @@ class ModernPushupApp:
         if not self.is_running:
             try:
                 pushups = self.pushups_var.get()
-                if pushups <= 0:
+                if (pushups <= 0):
                     messagebox.showerror("Error", "Number of pushups must be greater than 0!")
                     return
-                
                 self.reminder_service.start()
                 self.is_running = True
                 self.toggle_btn.configure(
@@ -579,7 +591,6 @@ class ModernPushupApp:
                     style="danger.TButton"
                 )
                 self.status_label.configure(text="Reminder is running...")
-                
             except ValueError:
                 messagebox.showerror("Error", "Please enter valid numbers!")
         else:
@@ -722,7 +733,6 @@ class SettingsWindow:
         # Update theme preview when radio button is selected
         def on_theme_change():
             self.preview_style.theme_use(theme_var.get())
-            
         # Create radio buttons for each theme
         for theme in Theme:
             ttk.Radiobutton(
@@ -736,7 +746,6 @@ class SettingsWindow:
 
         # Interval settings
         ttk.Label(container, text="Reminder Interval", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
-        
         interval_frame = ttk.Frame(container)
         interval_frame.pack(fill=tk.X, pady=(0, 20))
         
@@ -786,21 +795,17 @@ class SettingsWindow:
                 filetypes=[("Sound Files", "*.wav *.mp3")],
                 initialdir=str(Path.home())
             )
-            
             if file_path:
                 try:
                     sound_path = Path(file_path)
-                    
                     # Check file size
                     if sound_path.stat().st_size > AppSettings.MAX_SOUND_SIZE:
                         messagebox.showerror("Error", "Sound file must be smaller than 1MB")
                         return
-                    
                     # Check extension
                     if sound_path.suffix.lower() not in AppSettings.ALLOWED_EXTENSIONS:
                         messagebox.showerror("Error", "Only .wav and .mp3 files are supported")
                         return
-                    
                     # Copy file to sounds directory
                     dest_path = sounds_dir / sound_path.name
                     import shutil
@@ -827,7 +832,7 @@ class SettingsWindow:
             variable=sound_var,
             state="disabled" if not self.settings.custom_sound_path else "normal",
             command=lambda: self.play_sound(Path(self.settings.custom_sound_path)),
-            style="TRadiobutton"
+            style="TRadiobutton",
         ).pack(side=tk.LEFT, padx=5)
         
         # Daily goal
@@ -912,7 +917,7 @@ class SettingsWindow:
         """Stop any playing sound"""
         if pygame.mixer.music.get_busy():
             pygame.mixer.music.stop()
-    
+
     def close_window(self):
         """Handle window close"""
         self.stop_sound()
@@ -999,15 +1004,13 @@ class CompletionDialog:
 def setup_sounds_directory():
     sounds_dir = Path(__file__).parent / 'assets' / 'sounds'
     sounds_dir.mkdir(parents=True, exist_ok=True)
-    
     # Default sounds dictionary with names and sources
     default_sounds = {
         "Default": "mixkit-software-interface-start-2574.wav",
-        "Guitar_down": "mixkit-guitar-stroke-down-slow-2339.wav",
-        "Guitar_up": "mixkit-guitar-stroke-up-slow-2338.wav",
         "Rain": "mixkit-rain-in-the-forest-2337.wav",
+        "Guitar_up": "mixkit-guitar-stroke-up-slow-2338.wav",
+        "Guitar_down": "mixkit-guitar-stroke-down-slow-2339.wav",
     }
-    
     return sounds_dir, default_sounds
 
 def main():

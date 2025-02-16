@@ -87,7 +87,14 @@ The application automatically creates a configuration file at:
 
 ## Version History
 
-- v1.4 (Current)
+- v1.5 (Current)
+  - Fixed notification system reliability
+  - Added COM initialization for Windows notifications
+  - Added fallback notification method
+  - Fixed completion dialog display issues
+  - Added developer credits
+
+- v1.4
   - Added custom sound support
   - Improved tray icon functionality
   - Added daily goals feature
