@@ -86,6 +86,16 @@ The application automatically creates a configuration file at:
 - v1.7 (Current)
   - Added automatic updates with toggle option
 
+- v1.6 (Current)
+  - Added automatic updates with toggle option
+
+- v1.5
+  - Fixed notification system reliability
+  - Added COM initialization for Windows notifications
+  - Added fallback notification method
+  - Fixed completion dialog display issues
+  - Added developer credits
+
 - v1.4
   - Added custom sound support
   - Improved tray icon functionality
