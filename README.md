@@ -86,6 +86,8 @@ The application automatically creates a configuration file at:
 
 - v1.8 (Current)
   - Updated README to version 1.8
+  - Minor bug fixes and features
+  - added check for updates Button
 
 - v1.7
   - Added automatic updates with toggle option
