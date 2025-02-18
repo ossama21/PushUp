@@ -1,6 +1,6 @@
-# Pushup Reminder Pro v1.8
+# Pushup Reminder Pro v1.9
 
-Release Date: March 18, 2024
+Release Date: March 19, 2024
 
 A modern desktop application to help you maintain a regular pushup routine with customizable reminders and statistics tracking.
 
@@ -13,6 +13,7 @@ A modern desktop application to help you maintain a regular pushup routine with 
 - System tray support
 - Modern UI with multiple themes
 - Automatic updates with toggle option
+- Windows startup integration
 - Progress animations
 - Daily statistics tracking
 - Auto-start option
@@ -84,10 +85,17 @@ The application automatically creates a configuration file at:
 
 ## Version History
 
-- v1.8 (Current)
-  - Updated README to version 1.8
-  - Minor bug fixes and features
-  - added check for updates Button
+- v1.9 (Current)
+  - Added Windows startup integration
+  - Enhanced settings organization
+  - Improved registry handling
+  - Added startup persistence across reboots
+
+- v1.8
+  - Fixed version parsing for updates
+  - Improved GitHub API integration
+  - Enhanced update notifications
+  - Updated dependencies
 
 - v1.7
   - Added automatic updates with toggle option
@@ -122,6 +130,20 @@ The application automatically creates a configuration file at:
   - Added basic reminder functionality
   - Added pushup counter
   - Basic settings
+
+## Settings
+
+The application settings include:
+- Theme selection
+- Reminder intervals
+- Daily goals
+- Update preferences
+- Windows startup option
+- Progress display options
+
+Settings are stored in:
+- Config: `%USERPROFILE%\.pushup_reminder\config.json`
+- Registry: `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`
 
 ## License
 

@@ -20,6 +20,7 @@ import pythoncom
 import requests
 import sys
 from packaging import version  # Add this import
+import winreg  # Add this import at the top
 
 App_Version = "Pushup Reminder Pro v1.8"
 
@@ -48,6 +49,7 @@ class AppSettings:
     rest_duration: int = 60
     pushup_animation: bool = True
     auto_update: bool = True
+    start_with_windows: bool = False  # Add this field
 
     @classmethod
     def load(cls) -> 'AppSettings':
@@ -748,7 +750,7 @@ class SettingsWindow:
         self.settings = settings
         self.window = ttk.Toplevel(parent.root)  # Use parent.root for the window parent
         self.window.title("Settings")
-        self.window.geometry("400x700")
+        self.window.geometry("400x750")
         self.window.resizable(False, False)
         self.preview_style = ttk.Style()
         self.create_settings_form()
@@ -882,6 +884,17 @@ class SettingsWindow:
         )
         check_btn.pack(pady=(5, 0))
 
+        # Add startup option before updates section
+        startup_frame = ttk.Frame(container)
+        startup_frame.pack(fill=tk.X, pady=(20, 10))
+        
+        startup_var = tk.BooleanVar(value=self.settings.start_with_windows)
+        ttk.Checkbutton(
+            startup_frame,
+            text="Start with Windows",
+            variable=startup_var
+        ).pack(anchor=tk.W)
+        
         # Button frame at the bottom (move this to the end)
         button_frame = ttk.Frame(container)
         button_frame.pack(fill=tk.X, pady=(20, 0))
@@ -904,11 +917,12 @@ class SettingsWindow:
                 minutes_var.get(),
                 theme_var.get(),
                 goal_var.get(),
-                auto_update_var.get()
+                auto_update_var.get(),
+                startup_var.get()  # Add startup setting
             )
         ).pack(side=tk.RIGHT, padx=5)
         
-    def save_settings(self, hours, minutes, theme, goal, auto_update):
+    def save_settings(self, hours, minutes, theme, goal, auto_update, start_with_windows):
         """Save settings handler"""
         try:
             old_theme = self.settings.theme
@@ -919,7 +933,9 @@ class SettingsWindow:
             self.settings.theme = theme
             self.settings.daily_goal = goal
             self.settings.auto_update = auto_update  # Save auto_update setting
+            self.settings.start_with_windows = start_with_windows
             self.settings.save()
+            self.update_startup_registry(start_with_windows)
             theme_changed = old_theme != theme
             if theme_changed:
                 if messagebox.askyesno(
@@ -940,6 +956,33 @@ class SettingsWindow:
                 messagebox.showinfo("Success", "Settings saved successfully!")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save settings: {e}")
+
+    def update_startup_registry(self, enable: bool):
+        """Update Windows startup registry"""
+        try:
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            app_name = "PushupReminder"
+            exe_path = str(Path(sys.executable if getattr(sys, 'frozen', False) else __file__).resolve())
+            
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                
+                if enable:
+                    winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, f'"{exe_path}"')
+                else:
+                    try:
+                        winreg.DeleteValue(key, app_name)
+                    except WindowsError:
+                        # Key doesn't exist, which is fine when disabling
+                        pass
+                        
+                winreg.CloseKey(key)
+            except WindowsError as e:
+                raise Exception(f"Failed to update startup registry: {e}")
+                
+        except Exception as e:
+            print(f"Error updating startup registry: {e}")
+            raise
 
     def close_window(self):
         """Handle window close"""
