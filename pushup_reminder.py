@@ -21,6 +21,7 @@ import requests
 import sys
 from packaging import version  # Add this import
 import winreg  # Add this import at the top
+import webbrowser  # Add this import at the top
 
 App_Version = "Pushup Reminder Pro v1.9"
 
@@ -838,17 +839,29 @@ class SettingsWindow:
             
             def perform_check():
                 try:
-                    # Now we can access update_service through parent
                     has_update, new_version, download_url = self.parent.update_service.check_for_updates()
                     if has_update:
                         if messagebox.askyesno(
                             "Update Available",
                             f"Version {new_version} is available!\n\n"
-                            "Would you like to download and install it now?",
+                            "Would you like to download it now?",
                             parent=self.window
                         ):
-                            # Handle update installation
-                            pass
+                            # Open download URL in default browser
+                            if download_url:
+                                webbrowser.open(download_url)
+                                messagebox.showinfo(
+                                    "Download Started",
+                                    "The download has been opened in your browser.\n"
+                                    "Please install the new version manually.",
+                                    parent=self.window
+                                )
+                            else:
+                                messagebox.showerror(
+                                    "Download Failed",
+                                    "Could not find download URL for the update.",
+                                    parent=self.window
+                                )
                     else:
                         messagebox.showinfo(
                             "No Updates",
