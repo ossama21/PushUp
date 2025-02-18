@@ -1,5 +1,6 @@
-# Pushup Reminder Pro v2.0
-Release Date: 18th February 2025
+# Pushup Reminder Pro v1.9
+
+Release Date: March 19, 2024
 
 A modern desktop application to help you maintain a regular pushup routine with customizable reminders and statistics tracking.
 
@@ -84,13 +85,7 @@ The application automatically creates a configuration file at:
 
 ## Version History
 
-- v2.0 (Current)
-  - Fixed pushup count synchronization
-  - Fixed number of pushups not updating in completion dialog
-  - Improved settings persistence
-  - Added browser-based update downloads
-
-- v1.9
+- v1.9 (Current)
   - Added Windows startup integration
   - Enhanced settings organization
   - Improved registry handling
@@ -135,22 +130,6 @@ The application automatically creates a configuration file at:
   - Added basic reminder functionality
   - Added pushup counter
   - Basic settings
-
-## Known Issues Fixed
-
-- Pushup count now correctly updates when changed
-- Completion dialog shows correct number of pushups
-- Half pushups calculation now uses current value
-- Settings properly persist between sessions
-
-## Updates
-
-The application now features:
-- Direct browser download for updates
-- Manual check for updates in settings
-- Automatic update notifications
-- Proper version comparison
-- Clear update status messages
 
 ## Settings
 
