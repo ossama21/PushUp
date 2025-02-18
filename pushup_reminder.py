@@ -22,7 +22,7 @@ import sys
 from packaging import version  # Add this import
 import winreg  # Add this import at the top
 
-App_Version = "Pushup Reminder Pro v1.8"
+App_Version = "Pushup Reminder Pro v1.9"
 
 # Valid themes for ttkbootstrap
 class Theme(Enum):
