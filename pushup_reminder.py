@@ -23,7 +23,7 @@ from packaging import version  # Add this import
 import winreg  # Add this import at the top
 import webbrowser  # Add this import at the top
 
-App_Version = "Pushup Reminder Pro v1.9"
+App_Version = "Pushup Reminder Pro v2.0"
 
 # Valid themes for ttkbootstrap
 class Theme(Enum):
@@ -184,9 +184,10 @@ class NotificationService:
                 threaded=True
             )
             # Show completion dialog after notification
+            pushups = self.settings.pushups
             self.root.after(5000, lambda: CompletionDialog(
                 self.root,
-                self.settings.pushups,
+                pushups,  # Use current value
                 self.stats,
                 self.update_callback
             ))
@@ -626,6 +627,7 @@ class ModernPushupApp:
                 if pushups <= 0:
                     messagebox.showerror("Error", "Number of pushups must be greater than 0!")
                     return
+                self.settings.pushups = pushups  # Update settings with current value
                 self.reminder_service.start()
                 self.is_running = True
                 self.toggle_btn.configure(
@@ -744,6 +746,41 @@ class ModernPushupApp:
         
         # Update every second
         self.root.after(1000, self.update_countdown)
+
+    def save_settings(self, *args):
+        try:
+            self.settings.pushups = self.pushups_var.get()  # Save pushups count
+            old_theme = self.settings.theme
+            
+            # Update settings
+            self.settings.interval_hours = hours
+            self.settings.interval_minutes = minutes
+            self.settings.theme = theme
+            self.settings.daily_goal = goal
+            self.settings.auto_update = auto_update  # Save auto_update setting
+            self.settings.start_with_windows = start_with_windows
+            self.settings.save()
+            self.update_startup_registry(start_with_windows)
+            theme_changed = old_theme != theme
+            if theme_changed:
+                if messagebox.askyesno(
+                    "Restart Required",
+                    "Theme changes require a restart. Would you like to restart now?"
+                ):
+                    self.window.destroy()
+                    self.parent.destroy()
+                    self.parent.after_idle(main)
+                else:
+                    self.window.destroy()
+                    messagebox.showinfo(
+                        "Settings Saved",
+                        "Changes will take effect after restart."
+                    )
+            else:
+                self.window.destroy()
+                messagebox.showinfo("Success", "Settings saved successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save settings: {e}")
 
 class SettingsWindow:
     def __init__(self, parent, settings: AppSettings):
